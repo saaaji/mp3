@@ -2,3 +2,8 @@
 firmware/build/
 sdkconfig.old# Language server cache files
 .cache/
+
+# Documentation files (local dev)
+CODING_GUIDELINES.md
+PROJECT_OVERVIEW.md
+SD_CARD_CONFIG.md
