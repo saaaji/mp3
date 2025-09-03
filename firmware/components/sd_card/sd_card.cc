@@ -2,7 +2,8 @@
 #include <array>
 #include <cstring>
 #include <unistd.h>  // for access()
-#include <dirent.h>  // for directory operations
+#include <filesystem>  // C++ filesystem operations
+#include <system_error>  // for std::error_code
 
 SDCard::SDCard(const Config& config)
   : Component("SDCard", Component::MemoryLoad::kStandard, Component::Priority::kHigh, false),
@@ -78,39 +79,40 @@ std::array<std::array<char, SDCard::kMaxPathLength>, SDCard::kMaxFiles> SDCard::
   strcpy(music_dir, mount_point_.data());
   strcat(music_dir, "/music");
 
-  // Open the directory
-  DIR* dir = opendir(music_dir);
-  if (!dir) {
-    LOG("Failed to open music directory: %s", music_dir);
-    return files;
-  }
-
-  // Read directory entries
-  while (struct dirent* entry = readdir(dir)) {
+  // Iterate through directory using C++ filesystem (non-throwing)
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(music_dir, ec)) {
+    if (ec) {
+      LOG("Failed to iterate music directory: %s (error: %s)", music_dir, ec.message().c_str());
+      break;
+    }
+    
     if (file_count >= kMaxFiles) {
       break;
     }
 
-    // Check if file ends with .mp3
-    const char* name = entry->d_name;
-    const size_t name_len = strlen(name);
-    if (name_len > 4 && strcmp(name + name_len - 4, ".mp3") == 0) {
-      // Check if full path will fit
-      const size_t full_len = strlen(music_dir) + 1 + name_len;  // +1 for '/'
-      if (full_len >= kMaxPathLength) {
-        LOG("Path too long for file: %s", name);
-        continue;
-      }
-      
-      char* dest = files[file_count].data();
-      strcpy(dest, music_dir);
-      strcat(dest, "/");
-      strcat(dest, name);
-      file_count++;
+    // Check if it's a regular file with .mp3 extension
+    if (!entry.is_regular_file(ec) || ec) {
+      continue;  // Skip directories and handle errors gracefully
     }
-  }
 
-  closedir(dir);
+    const std::filesystem::path& file_path = entry.path();
+    if (file_path.extension() != ".mp3") {
+      continue;  // Skip non-MP3 files
+    }
+
+    // Get the full path as string
+    const std::string full_path_str = file_path.string();
+    if (full_path_str.length() >= kMaxPathLength) {
+      LOG("Path too long for file: %s", file_path.filename().c_str());
+      continue;
+    }
+    
+    char* dest = files[file_count].data();
+    strncpy(dest, full_path_str.c_str(), kMaxPathLength - 1);
+    dest[kMaxPathLength - 1] = '\0';  // Ensure null termination
+    file_count++;
+  }
   return files;
 }
 
@@ -162,8 +164,9 @@ std::array<std::array<char, SDCard::kMaxPathLength>, SDCard::kMaxFiles> SDCard::
     strcat(dest, "/music/");
     strcat(dest, line);
     
-    // Verify the file exists
-    if (access(dest, F_OK) == 0) {
+    // Verify the file exists using C++ filesystem (non-throwing)
+    std::error_code ec;
+    if (std::filesystem::exists(dest, ec) && !ec) {
       file_count++;
     } else {
       LOG("File in playback order not found: %s", dest);
@@ -175,9 +178,7 @@ std::array<std::array<char, SDCard::kMaxPathLength>, SDCard::kMaxFiles> SDCard::
 }
 
 /// @brief read bluetooth mac address from config file
-/// @param mac_address array to store the 6-byte mac address
-/// @return true if mac address was successfully read and parsed
-/// @note expects XX:XX:XX:XX:XX:XX format in /sdcard/config/bt_config.txt
+/// @note PLANNED MIGRATION: This method will be replaced with NVS storage to avoid thread safety issues between SD and WiFi components accessing the same storage medium
 bool SDCard::read_bluetooth_config(std::array<uint8_t, 6>& mac_address) {
   // Build config file path
   char config_path[kMaxPathLength];
