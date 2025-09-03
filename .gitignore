@@ -1,3 +1,4 @@
 .vscode/
 firmware/build/
-sdkconfig.old
+sdkconfig.old# Language server cache files
+.cache/

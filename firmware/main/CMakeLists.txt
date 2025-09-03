@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "main.cc" 
     INCLUDE_DIRS ""
-    REQUIRES util
+    REQUIRES util sd_card
 )
