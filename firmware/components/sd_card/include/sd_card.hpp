@@ -52,11 +52,11 @@ public:
   /// @note scans /sdcard/music/ directory for .mp3 files
   std::array<std::array<char, kMaxPathLength>, kMaxFiles> list_all_mp3_files();
   
-  /// @brief read bluetooth mac address from config file
-  /// @param mac_address array to store the 6-byte mac address
-  /// @return true if mac address was successfully read and parsed
-  /// @note expects XX:XX:XX:XX:XX:XX format in /sdcard/config/bt_config.txt
-  bool read_bluetooth_config(std::array<uint8_t, 6>& mac_address);
+  /// @brief get the current mount point for ESP-ADF integration
+  /// @return string_view of the mount point path
+  /// @note provides mount point for ESP-ADF fatfs_stream configuration
+  std::string_view get_mount_point() const;
+  
 
 protected:
   /// @brief perform SD card and SPI bus initialization

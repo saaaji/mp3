@@ -177,45 +177,10 @@ std::array<std::array<char, SDCard::kMaxPathLength>, SDCard::kMaxFiles> SDCard::
   return files;
 }
 
-/// @brief read bluetooth mac address from config file
-/// @note PLANNED MIGRATION: This method will be replaced with NVS storage to avoid thread safety issues between SD and WiFi components accessing the same storage medium
-bool SDCard::read_bluetooth_config(std::array<uint8_t, 6>& mac_address) {
-  // Build config file path
-  char config_path[kMaxPathLength];
-  const size_t base_len = strlen(mount_point_.data());
-  if (base_len + 22 >= kMaxPathLength) {  // 22 for "/config/bt_config.txt\0"
-    LOG("Mount point path too long for config file");
-    return false;
-  }
-  strcpy(config_path, mount_point_.data());
-  strcat(config_path, "/config/bt_config.txt");
-  
-  FILE* f = fopen(config_path, "r");
-  if (!f) {
-    LOG("Failed to open bluetooth config file: %s", config_path);
-    return false;
-  }
-
-  // Read MAC address in format "XX:XX:XX:XX:XX:XX"
-  char mac_str[18];
-  if (fgets(mac_str, sizeof(mac_str), f) == nullptr) {
-    fclose(f);
-    return false;
-  }
-  fclose(f);
-
-  // Parse MAC address
-  unsigned int values[6];
-  if (sscanf(mac_str, "%x:%x:%x:%x:%x:%x", 
-             &values[0], &values[1], &values[2],
-             &values[3], &values[4], &values[5]) != 6) {
-    return false;
-  }
-
-  // Convert to bytes
-  for (int i = 0; i < 6; i++) {
-    mac_address[i] = static_cast<uint8_t>(values[i]);
-  }
-
-  return true;
+/// @brief get the current mount point for ESP-ADF integration
+/// @return string_view of the mount point path
+/// @note provides mount point for ESP-ADF fatfs_stream configuration
+std::string_view SDCard::get_mount_point() const {
+  return std::string_view(mount_point_.data());
 }
+

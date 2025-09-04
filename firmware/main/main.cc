@@ -64,12 +64,6 @@ extern "C" void app_main() {
     return;
   }
 
-  // Read Bluetooth configuration
-  std::array<uint8_t, 6> mac_address;
-  if (!sd_card->read_bluetooth_config(mac_address)) {
-    LOG("Failed to read Bluetooth configuration");
-    return;
-  }
 
   // List available MP3 files in order
   const auto files = sd_card->get_ordered_mp3_files();
