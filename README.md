@@ -4,7 +4,7 @@
 This project aims to create a Bluetooth enabled MP3 player using the ESP32, with the following features:
 - SD card storage for MP3 files 
 - Bluetooth audio output to earbuds/headphones
-- Wifi Access point for configuring bluetooth device MAC adress and other settings
+- Wifi Access point for configuring bluetooth device MAC address and other settings
 - Physical controls (subject to change):
   - Power switch (on/off)
   - Play/pause button
