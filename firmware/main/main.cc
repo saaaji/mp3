@@ -16,13 +16,19 @@ constexpr std::size_t kMaxComponentCount = 8;
 class TestComponent : public Component {
 public:
   TestComponent() : Component(
-    "TestComponent", Component::MemoryLoad::kMinimal, Component::Priority::kLow, false) {}
+    "TestComponent", Component::MemoryLoad::kMinimal, Component::Priority::kLow, 1000) {}
 
-  void task_impl() {
+private:
+  int print_count_ = 0;
+
+  void task_impl() override {
     const std::string_view name = get_name();
-    for (int i = 0; i < 5; i++) {
-      printf("%s: Print Statement #%d\n", name.data(), i);
-      vTaskDelay(pdMS_TO_TICKS(1000));
+    printf("%s: Print Statement #%d\n", name.data(), print_count_);
+    print_count_++;
+    
+    // Stop after 5 iterations
+    if (print_count_ >= 5) {
+      stop();
     }
   }
 };

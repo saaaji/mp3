@@ -4,8 +4,10 @@ extern "C" {
 #include "esp_task_wdt.h"
 }
 
-Component::Component(const std::string_view name, const MemoryLoad load, const Priority priority, const bool detached) 
-  : load_(load), priority_(priority), detached_(detached) {
+Component::Component(const std::string_view name, const MemoryLoad load, const Priority priority, 
+                     uint32_t thread_period_ms, uint32_t watchdog_timeout_ms, const bool detached) 
+  : load_(load), priority_(priority), thread_period_ms_(thread_period_ms), 
+    watchdog_timeout_ms_(watchdog_timeout_ms ? watchdog_timeout_ms : thread_period_ms * 5), detached_(detached) {
   // trim name if necessary
   const std::size_t copy_length = std::min(
     name.size(),
@@ -41,17 +43,21 @@ bool Component::start() {
     // Give system a moment to stabilize before initializing
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    // Add this task to watchdog monitoring (optional - for long-running components)
-    // esp_task_wdt_add(NULL);
+    // Add this task to watchdog monitoring - detects task starvation
+    esp_task_wdt_add(NULL);
     
     // Initialize in the task context (not main task)
     self->initialize();
     
     // Reset watchdog after potentially slow initialization
-    // esp_task_wdt_reset();
+    esp_task_wdt_reset();
     
-    // Run the main task loop
-    self->task_impl();
+    // Framework-controlled periodic execution loop
+    while (self->is_running()) {
+      self->task_impl();  // Single iteration - no loops in components
+      esp_task_wdt_reset();  // Automatic watchdog petting
+      vTaskDelay(pdMS_TO_TICKS(self->thread_period_ms_));
+    }
     
     if (self->join_sem_handle_) {
       xSemaphoreGive(self->join_sem_handle_);
@@ -67,14 +73,13 @@ bool Component::start() {
   const std::uint8_t priority = static_cast<std::uint8_t>(priority_);
 
   TaskHandle_t handle;
-  const BaseType_t result = xTaskCreatePinnedToCore(
+  const BaseType_t result = xTaskCreate(
     task_wrapper,
     name_.data(),
     static_cast<configSTACK_DEPTH_TYPE>(stack_size),
     static_cast<void*>(this),
     static_cast<UBaseType_t>(priority), 
-    &handle,
-    1  // Pin to Core 1 (App CPU) 
+    &handle
   );
   
   if (handle && result == pdPASS) {
@@ -94,6 +99,10 @@ void Component::stop() {
 
 std::string_view Component::get_name() const {
   return std::string_view(name_.data());
+}
+
+void Component::pet_watchdog() {
+  esp_task_wdt_reset();
 }
 
 bool Component::join() {

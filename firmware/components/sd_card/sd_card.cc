@@ -10,7 +10,7 @@ extern "C" {
 }
 
 SDCard::SDCard(const Config& config)
-  : Component("SDCard", Component::MemoryLoad::kStandard, Component::Priority::kHigh, false),
+  : Component("SDCard", Component::MemoryLoad::kStandard, Component::Priority::kHigh, 5000),
     config_(config) {}
 
 SDCard::~SDCard() {
@@ -196,25 +196,26 @@ std::vector<std::string> SDCard::read_playback_order() {
 }
 
 void SDCard::task_impl() {
-  // Wait for initialization to complete
-  vTaskDelay(pdMS_TO_TICKS(200));
+  static bool first_run = true;
   
-  if (card_) {
-    ESP_LOGI("SDCard", "SD card mounted successfully with %s interface", 
-             config_.interface == Interface::SPI ? "SPI" : "SDMMC");
+  if (first_run) {
+    first_run = false;
     
-    // Discover MP3 files
-    std::size_t mp3_count = discover_mp3_files();
-    ESP_LOGI("SDCard", "Found %zu MP3 files", mp3_count);
+    if (card_) {
+      ESP_LOGI("SDCard", "SD card mounted successfully with %s interface", 
+               config_.interface == Interface::SPI ? "SPI" : "SDMMC");
+      
+      // Discover MP3 files
+      std::size_t mp3_count = discover_mp3_files();
+      ESP_LOGI("SDCard", "Found %zu MP3 files", mp3_count);
+    } else {
+      ESP_LOGE("SDCard", "SD card mount failed");
+    }
   } else {
-    ESP_LOGE("SDCard", "SD card mount failed");
-  }
-  
-  // Periodic monitoring
-  while (true) {
-    vTaskDelay(pdMS_TO_TICKS(10000));  // Check every 10 seconds
+    // Periodic monitoring - runs every 5 seconds (as set in constructor)
     if (card_) {
       // Periodic status check could go here
+      // For now, just a simple check
     }
   }
 }

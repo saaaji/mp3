@@ -31,7 +31,14 @@ public:
   static constexpr std::size_t kMaxComponentNameLength = 32;
 
   /// @brief create a Component, which encapsulates the logic of an RTOS task
-  Component(const std::string_view name, const MemoryLoad load, const Priority priority, const bool detached = false);
+  /// @param name component identifier
+  /// @param load memory/stack requirements
+  /// @param priority task priority
+  /// @param thread_period_ms how often task_impl() runs (milliseconds)
+  /// @param watchdog_timeout_ms watchdog timeout (0 = auto: 5x thread_period_ms)
+  /// @param detached whether task is joinable
+  Component(const std::string_view name, const MemoryLoad load, const Priority priority, 
+            uint32_t thread_period_ms, uint32_t watchdog_timeout_ms = 0, const bool detached = false);
 
   /// @brief destructor should always destroy the RTOS task
   ~Component();
@@ -47,9 +54,17 @@ public:
   /// @return boolean indicating successful task completion
   bool join();
 
-private:
-  /// @brief destroy the RTOS task
+protected:
+  /// @brief reset the watchdog timer for this task (call regularly in task_impl)
+  void pet_watchdog();
+
+  /// @brief check if component should continue running (used by framework)
+  virtual bool is_running() const { return task_handle_.has_value(); }
+
+  /// @brief stop the component task (callable from task_impl)
   void stop();
+
+private:
 
   /// @brief perform any initializations necessary for the task function
   virtual void initialize() {}
@@ -68,6 +83,12 @@ private:
 
   /// @brief component priority
   Priority priority_{Priority::kLow};
+
+  /// @brief task execution period in milliseconds
+  uint32_t thread_period_ms_{1000};
+
+  /// @brief watchdog timeout in milliseconds  
+  uint32_t watchdog_timeout_ms_{5000};
 
   /// @brief boolean indicating whether this task is joinable or not
   bool detached_{};
