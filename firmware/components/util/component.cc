@@ -23,16 +23,26 @@ Component::~Component() {
 }
 
 bool Component::start() {
-  // call initialization routine
-  initialize();
+  if (task_handle_) {
+    return false;  // already running
+  }
 
   // create join semaphore
   join_sem_handle_ = xSemaphoreCreateBinaryStatic(&join_sem_buffer_);
 
-  // create task
+  // create task - move initialization INTO the task to prevent main task blocking
   const auto task_wrapper = [](void* param) -> void {
     const auto self = static_cast<Component*>(param);
+    
+    // Give system a moment to stabilize before initializing
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Initialize in the task context (not main task)
+    self->initialize();
+    
+    // Run the main task loop
     self->task_impl();
+    
     if (self->join_sem_handle_) {
       xSemaphoreGive(self->join_sem_handle_);
     }
@@ -45,13 +55,15 @@ bool Component::start() {
   const std::uint8_t priority = static_cast<std::uint8_t>(priority_);
 
   TaskHandle_t handle;
-  const BaseType_t result = xTaskCreate(
+  const BaseType_t result = xTaskCreatePinnedToCore(
     task_wrapper,
     name_.data(),
     static_cast<configSTACK_DEPTH_TYPE>(stack_size),
     static_cast<void*>(this),
     static_cast<UBaseType_t>(priority), 
-    &handle);
+    &handle,
+    1  // Pin to Core 1 (App CPU) 
+  );
   
   if (handle && result == pdPASS) {
     task_handle_ = handle;

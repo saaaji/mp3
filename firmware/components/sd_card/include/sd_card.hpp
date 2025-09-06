@@ -3,11 +3,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
+#include <vector>
+#include <string>
 
 extern "C" {
-#include "driver/gpio.h"
-#include "driver/sdspi_host.h"
-#include "driver/spi_common.h"
+#include "esp_err.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 }
@@ -18,60 +19,71 @@ extern "C" {
 class SDCard : public Component {
 public:
   /// @brief maximum length for file paths and mount points
-  /// @note this includes null terminator and must accommodate longest possible path
-  static constexpr std::size_t kMaxPathLength = 128;
+  static constexpr std::size_t kMaxPathLength = 300;
   
   /// @brief maximum number of files to track
-  /// @note defines the size of the fixed arrays returned by file listing functions
   static constexpr std::size_t kMaxFiles = 32;
   
-  /// @brief configuration structure for sd card spi pins
-  struct Config {
-    gpio_num_t miso;    ///< master in slave out pin
-    gpio_num_t mosi;    ///< master out slave in pin
-    gpio_num_t sck;     ///< serial clock pin
-    gpio_num_t cs;      ///< chip select pin
+  /// @brief SD card interface type
+  enum class Interface {
+    SPI,      ///< Use SPI interface (SDSPI)
+    SDMMC     ///< Use SDMMC interface
   };
 
-  /// @brief create an sd card component with the specified pin configuration
-  /// @param config pin configuration for the sd card
-  /// @note inherits from Component with standard memory load and high priority
-  explicit SDCard(const Config& config);
+  /// @brief configuration structure for SD card interface
+  struct Config {
+    Interface interface = Interface::SPI;
+    
+    // SPI-specific configuration
+    int miso = -1;
+    int mosi = -1;
+    int sck = -1;
+    int cs = -1;
+    
+    // Common configuration
+    uint32_t max_frequency_khz = 20000;
+    bool format_if_mount_failed = false;
+    int max_open_files = 5;
+  };
 
-  /// @brief mount the SD card and initialize the filesystem
-  /// @return boolean indicating successful mounting of the SD card
+  explicit SDCard(const Config& config);
+  ~SDCard();
+
+  /// @brief check if SD card is mounted
   bool mount();
   
-  /// @brief get ordered list of mp3 files based on config/playback_order.txt
-  /// @return fixed-size array of paths in playback order, empty entries indicated by \0 at position 0
-  /// @note reads from /sdcard/config/playback_order.txt, one filename per line
-  std::array<std::array<char, kMaxPathLength>, kMaxFiles> get_ordered_mp3_files();
+  /// @brief unmount the SD card
+  void unmount();
   
-  /// @brief get all mp3 files from the music directory
-  /// @return fixed-size array of paths, empty entries indicated by \0 at position 0
-  /// @note scans /sdcard/music/ directory for .mp3 files
-  std::array<std::array<char, kMaxPathLength>, kMaxFiles> list_all_mp3_files();
+  /// @brief discover MP3 files on the SD card
+  /// @return number of MP3 files found
+  std::size_t discover_mp3_files();
   
-  /// @brief get the current mount point for ESP-ADF integration
-  /// @return string_view of the mount point path
-  /// @note provides mount point for ESP-ADF fatfs_stream configuration
-  std::string_view get_mount_point() const;
+  /// @brief get list of discovered MP3 files
+  /// @return vector of MP3 file paths
+  std::vector<std::string> get_mp3_files() const;
   
+  /// @brief read playback order from config file
+  /// @return vector of file names in playback order
+  std::vector<std::string> read_playback_order();
+  
+  /// @brief get mount point path
+  std::string_view get_mount_point() const { return mount_point_.data(); }
 
 protected:
-  /// @brief perform SD card and SPI bus initialization
   void initialize() override;
-
-  /// @brief main task implementation for SD card operations
   void task_impl() override;
 
 private:
-  /// @brief pin configuration for the SD card
+  /// @brief initialize SPI interface using official ESP-IDF approach
+  esp_err_t initialize_spi_interface();
+  
+  /// @brief create required directories
+  void create_directories();
+
   const Config config_;
-
-  /// @brief handle to the SD card
   sdmmc_card_t* card_{nullptr};
-
-  /// @brief mount point for the SD card filesystem
   std::array<char, kMaxPathLength> mount_point_{"/sdcard\0"};
+  std::array<std::array<char, kMaxPathLength>, kMaxFiles> files;
+  std::size_t file_count_{0};
 };

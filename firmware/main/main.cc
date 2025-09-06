@@ -45,33 +45,58 @@ extern "C" void app_main() {
     return;
   }
 
-  // Initialize SD card component
+  // Initialize SD card component with SPI interface (Arduino-compatible settings)
   const SDCard::Config sd_config{
+    .interface = SDCard::Interface::SPI,
     .miso = GPIO_NUM_19,
     .mosi = GPIO_NUM_23,
     .sck  = GPIO_NUM_18,
-    .cs   = GPIO_NUM_5
+    .cs   = GPIO_NUM_5,
+    .max_frequency_khz = 400,  // Start with very low frequency (400kHz) like Arduino
+    .format_if_mount_failed = false,
+    .max_open_files = 3
   };
 
+  // Wait a moment for system to stabilize
+  vTaskDelay(pdMS_TO_TICKS(500));
+  
   const auto sd_card = std::make_unique<SDCard>(sd_config);
+  LOG("Creating SD card component with SPI pins - MISO:%d, MOSI:%d, SCK:%d, CS:%d", 
+      sd_config.miso, sd_config.mosi, sd_config.sck, sd_config.cs);
+      
   if (!sd_card->start()) {
     LOG("Failed to start SD card task");
     return;
   }
 
+  // Additional delay for SD card task to initialize
+  vTaskDelay(pdMS_TO_TICKS(1000));
+
   if (!sd_card->mount()) {
-    LOG("Failed to mount SD card");
+    LOG("Failed to mount SD card - check wiring and card format");
     return;
   }
+  
+  LOG("SD card mounted successfully!");
 
 
   // List available MP3 files in order
-  const auto files = sd_card->get_ordered_mp3_files();
-  LOG("Found MP3 files in playback order:");
-  for (const auto& file : files) {
-    if (file[0] != '\0') {  // Only print valid entries
-      LOG("  %s", file.data());
-    }
+  // Discover MP3 files
+  std::size_t mp3_count = sd_card->discover_mp3_files();
+  LOG("Found %zu MP3 files", mp3_count);
+  
+  // Get and display all MP3 files
+  auto mp3_files = sd_card->get_mp3_files();
+  LOG("MP3 files on SD card:");
+  for (const auto& file : mp3_files) {
+    LOG("  %s", file.c_str());
+  }
+  
+  // Read playback order
+  auto playback_order = sd_card->read_playback_order();
+  LOG("Found %zu files in playback order:", playback_order.size());
+  for (const auto& file : playback_order) {
+    LOG("  %s", file.c_str());
   }
 
   LOG("SD card initialization complete");
