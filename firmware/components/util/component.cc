@@ -1,5 +1,9 @@
 #include "include/component.hpp"
 
+extern "C" {
+#include "esp_task_wdt.h"
+}
+
 Component::Component(const std::string_view name, const MemoryLoad load, const Priority priority, const bool detached) 
   : load_(load), priority_(priority), detached_(detached) {
   // trim name if necessary
@@ -37,8 +41,14 @@ bool Component::start() {
     // Give system a moment to stabilize before initializing
     vTaskDelay(pdMS_TO_TICKS(100));
     
+    // Add this task to watchdog monitoring (optional - for long-running components)
+    // esp_task_wdt_add(NULL);
+    
     // Initialize in the task context (not main task)
     self->initialize();
+    
+    // Reset watchdog after potentially slow initialization
+    // esp_task_wdt_reset();
     
     // Run the main task loop
     self->task_impl();
@@ -47,6 +57,8 @@ bool Component::start() {
       xSemaphoreGive(self->join_sem_handle_);
     }
 
+    // Remove from watchdog before deletion
+    // esp_task_wdt_delete(NULL);
     self->task_handle_ = std::nullopt;
     vTaskDelete(nullptr);
   };
