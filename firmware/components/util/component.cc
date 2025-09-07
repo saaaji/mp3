@@ -5,9 +5,8 @@ extern "C" {
 }
 
 Component::Component(const std::string_view name, const MemoryLoad load, const Priority priority, 
-                     uint32_t thread_period_ms, uint32_t watchdog_timeout_ms, const bool detached) 
-  : load_(load), priority_(priority), thread_period_ms_(thread_period_ms), 
-    watchdog_timeout_ms_(watchdog_timeout_ms ? watchdog_timeout_ms : thread_period_ms * 5), detached_(detached) {
+                     uint32_t thread_period_ms, const bool detached) 
+  : load_(load), priority_(priority), thread_period_ms_(thread_period_ms), detached_(detached) {
   // trim name if necessary
   const std::size_t copy_length = std::min(
     name.size(),

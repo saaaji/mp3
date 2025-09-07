@@ -35,10 +35,9 @@ public:
   /// @param load memory/stack requirements
   /// @param priority task priority
   /// @param thread_period_ms how often task_impl() runs (milliseconds)
-  /// @param watchdog_timeout_ms watchdog timeout (0 = auto: 5x thread_period_ms)
   /// @param detached whether task is joinable
   Component(const std::string_view name, const MemoryLoad load, const Priority priority, 
-            uint32_t thread_period_ms, uint32_t watchdog_timeout_ms = 0, const bool detached = false);
+            uint32_t thread_period_ms, const bool detached = false);
 
   /// @brief destructor should always destroy the RTOS task
   ~Component();
@@ -87,8 +86,6 @@ private:
   /// @brief task execution period in milliseconds
   uint32_t thread_period_ms_{1000};
 
-  /// @brief watchdog timeout in milliseconds  
-  uint32_t watchdog_timeout_ms_{5000};
 
   /// @brief boolean indicating whether this task is joinable or not
   bool detached_{};
