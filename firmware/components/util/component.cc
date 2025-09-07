@@ -22,8 +22,8 @@ Component::Component(const std::string_view name, const MemoryLoad load, const P
 
 Component::~Component() {
   if (!detached_) {
+    request_stop();
     join();
-    stop();
   }
 }
 
@@ -51,11 +51,17 @@ bool Component::start() {
     // Reset watchdog after potentially slow initialization
     esp_task_wdt_reset();
     
+    // Initialize timing for drift-free periodic execution
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xPeriod = pdMS_TO_TICKS(self->thread_period_ms_);
+    
     // Framework-controlled periodic execution loop
     while (self->is_running()) {
       self->task_impl();  // Single iteration - no loops in components
       esp_task_wdt_reset();  // Automatic watchdog petting
-      vTaskDelay(pdMS_TO_TICKS(self->thread_period_ms_));
+      
+      // Use vTaskDelayUntil for precise periodic timing without drift
+      vTaskDelayUntil(&xLastWakeTime, xPeriod);
     }
     
     if (self->join_sem_handle_) {
@@ -89,11 +95,8 @@ bool Component::start() {
   return result == pdPASS;
 }
 
-void Component::stop() {
-  if (task_handle_ && xTaskGetCurrentTaskHandle() != *task_handle_) {
-    vTaskDelete(*task_handle_);
-    task_handle_ = std::nullopt;
-  }
+void Component::request_stop() {
+  should_terminate_ = true;
 }
 
 std::string_view Component::get_name() const {

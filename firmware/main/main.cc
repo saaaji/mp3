@@ -28,7 +28,7 @@ private:
     
     // Stop after 5 iterations
     if (print_count_ >= 5) {
-      stop();
+      request_stop();
     }
   }
 };
@@ -75,37 +75,9 @@ extern "C" void app_main() {
     return;
   }
 
-  // Additional delay for SD card task to initialize
-  vTaskDelay(pdMS_TO_TICKS(1000));
-
-  if (!sd_card->mount()) {
-    LOG("Failed to mount SD card - check wiring and card format");
-    return;
-  }
-  
-  LOG("SD card mounted successfully!");
-
-
-  // List available MP3 files in order
-  // Discover MP3 files
-  std::size_t mp3_count = sd_card->discover_mp3_files();
-  LOG("Found %zu MP3 files", mp3_count);
-  
-  // Get and display all MP3 files
-  auto mp3_files = sd_card->get_mp3_files();
-  LOG("MP3 files on SD card:");
-  for (const auto& file : mp3_files) {
-    LOG("  %s", file.c_str());
-  }
-  
-  // Read playback order
-  auto playback_order = sd_card->read_playback_order();
-  LOG("Found %zu files in playback order:", playback_order.size());
-  for (const auto& file : playback_order) {
-    LOG("  %s", file.c_str());
-  }
-
-  LOG("SD card initialization complete");
+  // SD card will automatically initialize, mount, discover files, and read playback order
+  // in its initialize() method. Wait for initialization to complete.
+  vTaskDelay(pdMS_TO_TICKS(2000));
   
   // Wait for test component to finish its demonstration
   test_component->join();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -58,10 +59,10 @@ protected:
   void pet_watchdog();
 
   /// @brief check if component should continue running (used by framework)
-  virtual bool is_running() const { return task_handle_.has_value(); }
+  virtual bool is_running() const { return task_handle_.has_value() && !should_terminate_; }
 
-  /// @brief stop the component task (callable from task_impl)
-  void stop();
+  /// @brief request graceful termination of the component task
+  void request_stop();
 
 private:
 
@@ -89,6 +90,9 @@ private:
 
   /// @brief boolean indicating whether this task is joinable or not
   bool detached_{};
+
+  /// @brief flag to request graceful task termination
+  std::atomic<bool> should_terminate_{false};
 
   /// @brief buffer to store join semaphore on stack
   StaticSemaphore_t join_sem_buffer_{};
