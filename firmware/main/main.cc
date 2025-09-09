@@ -1,37 +1,34 @@
+#include <cassert>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 
-#include "esp_log.h"
-
-#include "component.hpp"
 #include "sd_card.hpp"
-#include "util.hpp"
 
-namespace {
+extern "C" {
 
-constexpr std::size_t kMaxComponentCount = 8;
+#include "esp_log.h"
+#include "esp_task_wdt.h"
 
 }
 
-class TestComponent : public Component {
-public:
-  TestComponent() : Component(
-    "TestComponent", Component::MemoryLoad::kMinimal, Component::Priority::kLow, 1000) {}
+namespace {
 
-private:
-  int print_count_ = 0;
+constexpr const char* kComponentTag = "AppMain";
+constexpr std::uint32_t kWatchdogTimeoutMs = 10 * 1000;
 
-  void task_impl() override {
-    const std::string_view name = get_name();
-    printf("%s: Print Statement #%d\n", name.data(), print_count_);
-    print_count_++;
-    
-    // Stop after 5 iterations
-    if (print_count_ >= 5) {
-      request_stop();
-    }
-  }
+const SdCardObject::Config kSdConfig = {
+  .interface = SdCardObject::Interface::SPI,
+  .miso = GPIO_NUM_19,
+  .mosi = GPIO_NUM_23,
+  .sck = GPIO_NUM_18,
+  .cs = GPIO_NUM_5,
+  .max_frequency_khz = 400,
+  .max_open_files = 3,
+  .format_if_mount_failed = false,
 };
+
+}
 
 /// @brief restart system software whenever RTOS task stack overflows
 /// @param handle handle for the RTOS task
@@ -44,46 +41,53 @@ extern "C" void vApplicationStackOverflowHook(TaskHandle_t handle, char *name) {
 
 /// @brief firmware entrypoint
 extern "C" void app_main() {
-  // Create a test component to demonstrate basic task functionality
-  const auto test_component = std::make_unique<TestComponent>();
-  if (!test_component->start()) {
-    LOG("Failed to start test component");
-    return;
-  }
+  /**
+   * LOGGING CONFIGURATION
+   */
+  esp_log_level_set("*", ESP_LOG_VERBOSE);
 
-  // Initialize SD card component with SPI interface (Arduino-compatible settings)
-  const SDCard::Config sd_config{
-    .interface = SDCard::Interface::SPI,
-    .miso = GPIO_NUM_19,
-    .mosi = GPIO_NUM_23,
-    .sck  = GPIO_NUM_18,
-    .cs   = GPIO_NUM_5,
-    .max_frequency_khz = 400,  // Start with very low frequency (400kHz) like Arduino
-    .format_if_mount_failed = false,
-    .max_open_files = 3
+  /**
+   * WATCHDOG CONFIGURATION
+   */
+  const esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = kWatchdogTimeoutMs,
+    .idle_core_mask = 0,
+    .trigger_panic = true
   };
-
-  // Wait a moment for system to stabilize
-  vTaskDelay(pdMS_TO_TICKS(500));
   
-  const auto sd_card = std::make_unique<SDCard>(sd_config);
-  LOG("Creating SD card component with SPI pins - MISO:%d, MOSI:%d, SCK:%d, CS:%d", 
-      sd_config.miso, sd_config.mosi, sd_config.sck, sd_config.cs);
-      
-  if (!sd_card->start()) {
-    LOG("Failed to start SD card task");
-    return;
+  // initialize the watchdog if necessary
+  switch (esp_task_wdt_status(nullptr)) {
+    case ESP_ERR_INVALID_STATE:
+      ESP_ERROR_CHECK(esp_task_wdt_init(&wdt_config));
+      [[fallthrough]];
+    case ESP_ERR_NOT_FOUND:
+      esp_task_wdt_add(nullptr);
+      break;
   }
 
-  // SD card will automatically initialize, mount, discover files, and read playback order
-  // in its initialize() method. Wait for initialization to complete.
-  vTaskDelay(pdMS_TO_TICKS(2000));
-  
-  // Wait for test component to finish its demonstration
-  test_component->join();
-  LOG("Test component completed");
+  /**
+   * COMPONENT INITIALIZATION
+   */
+  std::vector<std::shared_ptr<ActiveObject>> components;
+  components.push_back(std::make_shared<SdCardObject>(kSdConfig));
 
-  // Keep the SD card task running
-  sd_card->join();
-  LOG("All joinable components done");
+  // start all components
+  for (auto component : components) {
+    const auto status = component->start();
+    if (!status) {
+      ESP_LOGE(kComponentTag, "ActiveObject failed to initialize: '%s'", component->get_name().data());
+      assert(false);
+    }
+  }
+
+  // join all components
+  for (auto component : components) {
+    component->join();
+  }
+  ESP_LOGI(kComponentTag, "Components joined");
+
+  /**
+   * CLEANUP
+   */
+  esp_task_wdt_delete(nullptr);
 }

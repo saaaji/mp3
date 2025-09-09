@@ -1,187 +1,193 @@
-#include "include/sd_card.hpp"
 #include <array>
+#include <cassert>
 #include <cstring>
-#include <unistd.h>  // for access()
-#include <dirent.h>  // for directory operations
-#include <sys/stat.h>  // for mkdir
+#include <filesystem>
+#include <system_error>
+#include <string_view>
 
-SDCard::SDCard(const Config& config)
-  : Component("SDCard", Component::MemoryLoad::kStandard, Component::Priority::kHigh, 1000, false),
+#include "include/sd_card.hpp"
+
+namespace {
+
+constexpr const char* kComponentTag = "SdCardObject";
+constexpr std::string_view kConfigPath = "/config/playback_order.txt";
+
+struct FileGuard {
+  void operator()(FILE* file) const noexcept {
+    if (file) fclose(file);
+  }
+};
+
+}
+
+SdCardObject::SdCardObject(const Config& config)
+  : ActiveObject("SdCardObject", ActiveObject::MemoryLoad::kStandard, ActiveObject::Priority::kHigh, 1000),
     config_(config) {}
 
-SDCard::~SDCard() {
+SdCardObject::~SdCardObject() {
   unmount();
 }
 
-void SDCard::initialize() {
+void SdCardObject::initialize() {
   // Initialize SPI bus
-  spi_bus_config_t bus_config = {};  // Zero initialize first
+  spi_bus_config_t bus_config;
+  std::memset(&bus_config, 0, sizeof(bus_config));
+
+  // copy config values
   bus_config.mosi_io_num = config_.mosi;
   bus_config.miso_io_num = config_.miso;
   bus_config.sclk_io_num = config_.sck;
   bus_config.quadwp_io_num = -1;
   bus_config.quadhd_io_num = -1;
   bus_config.max_transfer_sz = 4000;
-  // All other fields will be 0/default initialized
 
-  // Initialize SD card
+  // try to initialize SPI bus
+  ESP_ERROR_CHECK(spi_bus_initialize(
+    SDSPI_DEFAULT_HOST, 
+    &bus_config, 
+    SDSPI_DEFAULT_DMA
+  ));
+
+  // try to initialize SD card
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
   sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-  slot_config.gpio_cs = static_cast<gpio_num_t>(config_.cs);
+  
+  slot_config.gpio_cs = config_.cs;
   slot_config.host_id = SDSPI_DEFAULT_HOST;
 
-  // Mount FAT filesystem
+  // FAT mount config
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-    .format_if_mount_failed = false,
-    .max_files = 5,
+    .format_if_mount_failed = config_.format_if_mount_failed,
+    .max_files = config_.max_open_files,
     .allocation_unit_size = 16 * 1024,
     .disk_status_check_enable = false,
     .use_one_fat = false
   };
-
-  esp_err_t ret = spi_bus_initialize(
-    static_cast<spi_host_device_t>(SDSPI_DEFAULT_HOST), 
-    &bus_config, 
-    SDSPI_DEFAULT_DMA);
-  CHECK_EQ(ret, ESP_OK, "Failed to initialize SPI bus");
-
-  ret = esp_vfs_fat_sdspi_mount(
+  
+  ESP_ERROR_CHECK(esp_vfs_fat_sdspi_mount(
     mount_point_.data(), 
     &host, 
     &slot_config, 
     &mount_config, 
-    &card_);
-  CHECK_EQ(ret, ESP_OK, "Failed to mount SD card");
+    &card_
+  ));
   
-  LOG("SD card mounted successfully!");
+  ESP_LOGI(kComponentTag, "SD card mount was successful");
   
   // Create required directories
-  create_directories();
-  
-  // Discover MP3 files during initialization
-  discover_mp3_files();
-  LOG("Found %zu MP3 files", file_count_);
+  assert(create_directories());
   
   // Get and display all discovered MP3 files
-  auto mp3_files = get_mp3_files();
-  LOG("MP3 files on SD card:");
-  for (const auto& file : mp3_files) {
-    LOG("  %s", file.c_str());
+  file_paths_ = get_mp3_files();
+  ESP_LOGI(kComponentTag, "MP3 files on SD card:");
+  for (const auto& file : file_paths_) {
+    ESP_LOGI(kComponentTag, "\t%s", file.c_str());
   }
   
   // Read playback order
-  auto playback_order = read_playback_order();
-  LOG("Found %zu files in playback order:", playback_order.size());
-  for (const auto& file : playback_order) {
-    LOG("  %s", file.c_str());
+  queue_ = read_playback_order();
+  ESP_LOGI(kComponentTag, "Found %zu files in playback order:", queue_.size());
+  for (const auto& file : queue_) {
+    ESP_LOGI(kComponentTag, "\t%s", file.c_str());
   }
   
-  LOG("SD card initialization complete");
+  ESP_LOGI(kComponentTag, "SD card initialization complete");
 }
 
-void SDCard::task_impl() {
+void SdCardObject::task() {
   // Periodic SD card monitoring (no infinite loop - framework handles timing)
   // Could check card status, file system health, etc.
   // For now, just a placeholder
+  mark_as_done();
 }
 
-bool SDCard::mount() {
+bool SdCardObject::mount() {
   // Mount is handled in initialize()
   return card_ != nullptr;
 }
 
-void SDCard::unmount() {
+void SdCardObject::unmount() {
   if (card_) {
-    esp_vfs_fat_sdcard_unmount(mount_point_.data(), card_);
+    ESP_ERROR_CHECK(esp_vfs_fat_sdcard_unmount(mount_point_.data(), card_));
     card_ = nullptr;
   }
 }
 
-std::size_t SDCard::discover_mp3_files() {
-  file_count_ = 0;
-  
-  // Build music directory path
-  char music_dir[kMaxPathLength];
-  strlcpy(music_dir, mount_point_.data(), sizeof(music_dir));
-  strlcat(music_dir, "/music", sizeof(music_dir));
+std::vector<std::string> SdCardObject::get_mp3_files() {
+  std::vector<std::string> files;
+  std::error_code ec;
 
-  // Open the directory
-  DIR* dir = opendir(music_dir);
-  if (!dir) {
-    LOG("Failed to open music directory: %s", music_dir);
-    return 0;
+  const auto music_path = std::filesystem::path(mount_point_.data()) / "music";
+  std::filesystem::directory_iterator music_iter(music_path, ec), end{};
+
+  if (ec) {
+    ESP_LOGE(kComponentTag, "Could not initialize directory_iterator: '%s'", music_path.c_str());
+    return {};
   }
 
-  // Read directory entries
-  while (struct dirent* entry = readdir(dir)) {
-    if (file_count_ >= kMaxFiles) {
-      break;
+  while (music_iter != end) {
+    const auto& entry = *music_iter;
+
+    if (entry.is_regular_file() && entry.path().extension() == ".mp3") {
+      files.push_back(entry.path());
     }
 
-    // Check if file ends with .mp3
-    const char* name = entry->d_name;
-    const size_t len = strlen(name);
-    if (len > 4 && strcmp(name + len - 4, ".mp3") == 0) {
-      strlcpy(files[file_count_].data(), music_dir, kMaxPathLength);
-      strlcat(files[file_count_].data(), "/", kMaxPathLength);
-      strlcat(files[file_count_].data(), name, kMaxPathLength);
-      file_count_++;
+    // move to next entry
+    music_iter.increment(ec);
+    if (ec) {
+      ESP_LOGE(kComponentTag, "Increment error: %s", ec.message().c_str());
     }
   }
 
-  closedir(dir);
-  return file_count_;
+  return files;
 }
 
-std::vector<std::string> SDCard::get_mp3_files() const {
-  std::vector<std::string> result;
-  for (std::size_t i = 0; i < file_count_; ++i) {
-    result.emplace_back(files[i].data());
-  }
-  return result;
-}
-
-std::vector<std::string> SDCard::read_playback_order() {
+std::vector<std::string> SdCardObject::read_playback_order() {
   std::vector<std::string> order;
-  
-  // Try to open the playback order file
-  char order_path[kMaxPathLength];
-  strlcpy(order_path, mount_point_.data(), sizeof(order_path));
-  strlcat(order_path, "/config/playback_order.txt", sizeof(order_path));
-  
-  FILE* f = fopen(order_path, "r");
-  if (!f) {
-    LOG("No playback order file found, using discovery order");
+
+  const auto order_path = std::filesystem::path(mount_point_.data()) / kConfigPath;
+  if (std::filesystem::exists(order_path)) {
+    // open the file
+    std::unique_ptr<FILE, FileGuard> file{fopen(order_path.c_str(), "r")};
+    
+    if (!file.get()) {
+      ESP_LOGE(kComponentTag, "Playback order file could not be opened, defaulting to filesystem order");
+      return get_mp3_files();
+    }
+
+    // Read file names from the order file
+    std::array<char, kMaxPathLength> line{'\0'};
+    while (fgets(line.data(), line.size(), file.get())) {
+      // Remove newline
+      line.at(strcspn(line.data(), "\n")) = '\0';
+      
+      if (strlen(line.data()) > 0) {
+        order.emplace_back(line.data());
+      }
+    }
+    
+    return order;
+  } else {
+    ESP_LOGI(kComponentTag, "No playback order specified, defaulting to filesystem order");
     return get_mp3_files();
   }
-
-  // Read file names from the order file
-  char line[kMaxPathLength];
-  while (fgets(line, sizeof(line), f) && order.size() < kMaxFiles) {
-    // Remove newline
-    line[strcspn(line, "\n")] = 0;
-    if (strlen(line) > 0) {
-      order.emplace_back(line);
-    }
-  }
-  
-  fclose(f);
-  return order;
 }
 
-void SDCard::create_directories() {
-  // Create music directory
-  char music_dir[kMaxPathLength];
-  strlcpy(music_dir, mount_point_.data(), sizeof(music_dir));
-  strlcat(music_dir, "/music", sizeof(music_dir));
-  
-  // Create config directory  
-  char config_dir[kMaxPathLength];
-  strlcpy(config_dir, mount_point_.data(), sizeof(config_dir));
-  strlcat(config_dir, "/config", sizeof(config_dir));
-  
-  // Create directories (mkdir returns 0 on success, -1 if already exists)
-  mkdir(music_dir, 0755);
-  mkdir(config_dir, 0755);
+bool SdCardObject::create_directories() {
+  for (const auto& name : {"music", "config"}) {
+    const auto path = std::filesystem::path(mount_point_.data()) / name;
+    
+    std::error_code ec;
+    if (!std::filesystem::create_directory(path, ec)) {
+      if (ec) {
+        ESP_LOGE(kComponentTag, "Could not create directory '%s': %s", path.c_str(), ec.message().c_str());
+        return false;
+      } else {
+        ESP_LOGI(kComponentTag, "Directory '%s' already exists", path.c_str());
+      }
+    }
+  }
+
+  return true;
 }
 
