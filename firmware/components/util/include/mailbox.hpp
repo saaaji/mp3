@@ -52,6 +52,7 @@ private:
     std::size_t payload_size; // size of the message payload in bytes
   };
 
+public:
   /// @brief handle for sending messages
   class SendHandle {
   public:
@@ -91,8 +92,8 @@ private:
     /// @param handle esp32 Ringbuffer handle
     /// @param raw_slice the raw slice acquired from the Ringbuffer (including header)
     RecvHandle(RingbufHandle_t handle, std::uint8_t* raw_slice) 
-      : handle_(handle), 
-        raw_slice_(raw_slice),
+      : raw_slice_(raw_slice),
+        handle_(handle), 
         header_(*reinterpret_cast<MessageHeader*>(raw_slice)),
         payload_(raw_slice + sizeof(MessageHeader), header_.payload_size) {}
 
@@ -118,19 +119,19 @@ private:
   private:
     template<std::size_t Index, typename Visitor>
     void visit_impl(Visitor&& visitor) const {
-      if constexpr (Index >= sizeof...(ExplicitMessageTypes)) {
-        static_assert(always_false_v<Visitor>, "should never receive an invalid message");
-      } else {
+      if constexpr (Index < sizeof...(ExplicitMessageTypes)) {
         using M = std::tuple_element_t<Index, std::tuple<ExplicitMessageTypes...>>;
         if (header_.type_id == Index) {
           if constexpr (Serializable<M>) {
             M msg = M::deserialize(payload_.data());
             
             visitor(msg);
+            return;
           } else if constexpr (TriviallyCopyable<M>) {
             const M& msg = *reinterpret_cast<const M*>(payload_.data());
 
             visitor(msg);
+            return;
           } else {
             static_assert(always_false_v<Visitor>, "message type should either be Serializable or TriviallyCopyable");
           }
@@ -262,7 +263,7 @@ public:
     // write header
     uint8_t* slice;
     new (slice) MessageHeader{kBlobTypeId, payload_size};
-    return SendHandle(handle_, slice, payload_size);
+    return std::make_optional<SendHandle>(handle_, slice, payload_size);
   }
 
   /// @brief receive a handle to the latest item in the Ringbuffer
@@ -277,7 +278,7 @@ public:
       return std::nullopt;
     }
 
-    return RecvHandle(handle_, raw_slice);
+    return std::make_optional<RecvHandle>(handle_, raw_slice);
   }
 
 private:
@@ -296,7 +297,7 @@ public:
 
   /// @brief same interface as Mailbox 
   template<typename M>
-  bool send(const M& msg, const TickType_t timeout = portMAX_DELAY) {
+  bool send_message(const M& msg, const TickType_t timeout = portMAX_DELAY) {
     return mailbox_.send_message(msg, timeout);
   }
 

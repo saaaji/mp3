@@ -2,7 +2,9 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 
+#include "util.hpp"
 #include "active_object.hpp"
 #include "mailbox.hpp"
 #include "sd_card.hpp"
@@ -34,20 +36,46 @@ const SdCardObject::Config kSdConfig = {
 
 class TestComponent : public ActiveObject {
 public:
-  TestComponent() : ActiveObject(
-    "TestComponent", ActiveObject::MemoryLoad::kMinimal, ActiveObject::Priority::kLow, 1000) {}
+  TestComponent(std::optional<mp3::mailbox::MailboxSender<int, float>> sender = std::nullopt) 
+    : ActiveObject(sender ? "TestSend" : "TestRecv", ActiveObject::MemoryLoad::kMinimal, ActiveObject::Priority::kLow, 1000),
+      sender_(sender) {}
+
+  mp3::mailbox::MailboxSender<int, float> get_sender() {
+    return mp3::mailbox::MailboxSender(mailbox_);
+  }
 
 private:
-  int print_count_ = 0;
+  mp3::mailbox::Mailbox<int, float> mailbox_{1024};
+  std::optional<mp3::mailbox::MailboxSender<int, float>> sender_;
+  
+  int counter_{0};
 
-  void task_impl() override {
+  void task() override {
     const std::string_view name = get_name();
-    printf("%s: Print Statement #%d\n", name.data(), print_count_);
-    print_count_++;
     
-    // Stop after 5 iterations
-    if (print_count_ >= 5) {
-      mark_as_done();
+    if (sender_) {
+      printf("%s: sending int (%d)\n", name.data(), counter_);
+      sender_->send_message<float>(counter_/5.0);
+
+      if (counter_++ >= 5) {
+        sender_->send_message<int>(-1);
+        mark_as_done();
+      }
+    } else {
+      auto handle = mailbox_.acquire_recv_handle();
+      if (handle) {
+        handle->visit(overloads{
+          [&](float f) {
+            printf("%s: message received (%d%%)\n", name.data(), (int)(f*100));
+          },
+          [&](int i) {
+            if (i < 0) {
+              mark_as_done();
+            }
+          },
+          [](std::span<const std::uint8_t> blob) {}
+        });
+      }
     }
   }
 };
@@ -93,6 +121,11 @@ extern "C" void app_main() {
   std::vector<std::shared_ptr<ActiveObject>> components;
 
   components.push_back(std::make_shared<SdCardObject>(kSdConfig));
+
+  auto obj1 = std::make_shared<TestComponent>();
+  auto obj2 = std::make_shared<TestComponent>(obj1->get_sender());
+  components.push_back(obj2);
+  components.push_back(obj1);
 
   // start all components
   for (auto component : components) {
