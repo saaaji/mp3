@@ -3,6 +3,8 @@
 #include <cstring>
 #include <memory>
 
+#include "active_object.hpp"
+#include "mailbox.hpp"
 #include "sd_card.hpp"
 
 extern "C" {
@@ -29,6 +31,26 @@ const SdCardObject::Config kSdConfig = {
 };
 
 }
+
+class TestComponent : public ActiveObject {
+public:
+  TestComponent() : ActiveObject(
+    "TestComponent", ActiveObject::MemoryLoad::kMinimal, ActiveObject::Priority::kLow, 1000) {}
+
+private:
+  int print_count_ = 0;
+
+  void task_impl() override {
+    const std::string_view name = get_name();
+    printf("%s: Print Statement #%d\n", name.data(), print_count_);
+    print_count_++;
+    
+    // Stop after 5 iterations
+    if (print_count_ >= 5) {
+      mark_as_done();
+    }
+  }
+};
 
 /// @brief restart system software whenever RTOS task stack overflows
 /// @param handle handle for the RTOS task
@@ -66,9 +88,10 @@ extern "C" void app_main() {
   }
 
   /**
-   * COMPONENT INITIALIZATION
+   * ACTIVE OBJECT INITIALIZATION
    */
   std::vector<std::shared_ptr<ActiveObject>> components;
+
   components.push_back(std::make_shared<SdCardObject>(kSdConfig));
 
   // start all components

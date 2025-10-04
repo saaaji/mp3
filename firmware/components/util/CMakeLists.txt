@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "component.cc"
+    SRCS "active_object.cc"
     INCLUDE_DIRS "include"
 )

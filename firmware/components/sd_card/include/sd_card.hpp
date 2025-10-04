@@ -15,7 +15,7 @@ extern "C" {
 
 }
 
-#include "component.hpp"
+#include "active_object.hpp"
 #include "util.hpp"
 
 class SdCardObject : public ActiveObject {

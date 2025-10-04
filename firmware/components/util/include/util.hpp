@@ -22,3 +22,10 @@
 
 #define CHECK_EQ(v1, v2, ...) CHECK(v1 == v2, __VA_ARGS__)
 #define CHECK_NEQ(v1, v2, ...) CHECK(v1 != v2, __VA_ARGS__)
+
+template<typename T>
+inline constexpr bool always_false_v = false;
+
+// helper type for visitors
+template<class... Ts>
+struct overloads : Ts... { using Ts::operator()...; };

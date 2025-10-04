@@ -30,9 +30,9 @@ public:
   };
 
   enum class CorePreference : BaseType_t {
+    kNone = tskNO_AFFINITY,
     kZero = 0,
-    kOne = 1,
-    kNone = tskNO_AFFINITY
+    kOne = 1
   };
 
   static constexpr std::size_t kMaxComponentNameLength = 32;
