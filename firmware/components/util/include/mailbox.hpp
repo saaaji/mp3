@@ -2,20 +2,24 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <variant>
 #include <type_traits>
+#include <span>
+#include <tuple>
 
 #include "util.hpp"
 
 extern "C" {
 
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/ringbuf.h"
 
 }
 
-namespace mp3::mailbox {
+namespace mp3 {
 
 using ::xRingbufferCreate;
 using ::vRingbufferDelete;
@@ -44,8 +48,12 @@ private:
   static constexpr std::uint8_t kBlobTypeId = 255;
 
   /// @brief determine the maximum alignment required by the message types
-  static constexpr std::size_t max_alignment_ = std::max({alignof(ExplicitMessageTypes)...}); 
-  
+  static constexpr std::size_t max_alignment_ = []() constexpr {
+    std::size_t result = 1;
+    ((result = std::max(result, alignof(ExplicitMessageTypes))), ...);
+    return result;
+  }();
+
   /// @brief metadata header for messages
   struct alignas(max_alignment_) MessageHeader {
     std::uint8_t type_id; // type identifier for the message
@@ -115,6 +123,8 @@ public:
 
     RecvHandle(const RecvHandle&) = delete;
     RecvHandle& operator=(const RecvHandle&) = delete;
+    RecvHandle(RecvHandle&&) = delete;
+    RecvHandle& operator=(RecvHandle&&) = delete;
 
   private:
     template<std::size_t Index, typename Visitor>
@@ -133,7 +143,7 @@ public:
             visitor(msg);
             return;
           } else {
-            static_assert(always_false_v<Visitor>, "message type should either be Serializable or TriviallyCopyable");
+            static_assert(always_false_v<M>, "message type should either be Serializable or TriviallyCopyable");
           }
         } else {
           visit_impl<Index + 1>(std::forward<Visitor>(visitor));
@@ -253,7 +263,7 @@ public:
     const std::size_t total_size = sizeof(MessageHeader) + payload_size;  
     
     void* raw_ptr = nullptr;
-    BaseType_t stat = xRingbufferSendAcquire(handle_, raw_ptr, total_size, timeout);
+    BaseType_t stat = xRingbufferSendAcquire(handle_, &raw_ptr, total_size, timeout);
 
     // unable to acquire space in the Ringbuffer (timed out)
     if (stat != pdTRUE) {
@@ -261,7 +271,7 @@ public:
     }
 
     // write header
-    uint8_t* slice;
+    uint8_t* slice = static_cast<uint8_t*>(raw_ptr);
     new (slice) MessageHeader{kBlobTypeId, payload_size};
     return std::make_optional<SendHandle>(handle_, slice, payload_size);
   }
@@ -284,33 +294,6 @@ public:
 private:
   /// @brief handle for the underlying esp32 Ringbuffer
   RingbufHandle_t handle_{nullptr};
-};
-
-/// @brief wrapper for Mailbox that only exposes sending behaviors
-/// @tparam ...ExplicitMessageTypes message types
-template<typename... ExplicitMessageTypes>
-class MailboxSender {
-public:
-  /// @brief create sender
-  /// @param mailbox mailbox to create a sender for
-  MailboxSender(Mailbox<ExplicitMessageTypes...>& mailbox) : mailbox_(mailbox) {}
-
-  /// @brief same interface as Mailbox 
-  template<typename M>
-  bool send_message(const M& msg, const TickType_t timeout = portMAX_DELAY) {
-    return mailbox_.send_message(msg, timeout);
-  }
-
-  /// @brief same interface as Mailbox 
-  std::optional<typename Mailbox<ExplicitMessageTypes...>::SendHandle> acquire_send_handle(
-    const std::size_t payload_size, const TickType_t timeout = portMAX_DELAY
-  ) {
-    return mailbox_.acquire_send_handle(payload_size, timeout);
-  }
-
-private:
-  /// @brief internal Mailbox reference
-  Mailbox<ExplicitMessageTypes...>& mailbox_;
 };
 
 }

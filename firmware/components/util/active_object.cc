@@ -77,6 +77,9 @@ bool ActiveObject::start() {
       }
     }
 
+    size_t high_mark = static_cast<size_t>(uxTaskGetStackHighWaterMark(nullptr));
+    ESP_LOGI(kComponentTag, "stack watermark for '%s': %zu", self->name_.data(), high_mark);
+
     // release the binary join semaphore
     if (self->join_sem_handle_) {
       xSemaphoreGive(self->join_sem_handle_);

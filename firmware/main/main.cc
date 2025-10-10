@@ -1,3 +1,4 @@
+#include <array>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -6,13 +7,15 @@
 
 #include "util.hpp"
 #include "active_object.hpp"
-#include "mailbox.hpp"
 #include "sd_card.hpp"
+#include "wifi_object.hpp"
+#include "mailbox.hpp"
 
 extern "C" {
 
 #include "esp_log.h"
 #include "esp_task_wdt.h"
+#include "esp_heap_caps.h"
 
 }
 
@@ -34,59 +37,15 @@ const SdCardObject::Config kSdConfig = {
 
 }
 
-class TestComponent : public ActiveObject {
-public:
-  TestComponent(std::optional<mp3::mailbox::MailboxSender<int, float>> sender = std::nullopt) 
-    : ActiveObject(sender ? "TestSend" : "TestRecv", ActiveObject::MemoryLoad::kMinimal, ActiveObject::Priority::kLow, 1000),
-      sender_(sender) {}
-
-  mp3::mailbox::MailboxSender<int, float> get_sender() {
-    return mp3::mailbox::MailboxSender(mailbox_);
-  }
-
-private:
-  mp3::mailbox::Mailbox<int, float> mailbox_{1024};
-  std::optional<mp3::mailbox::MailboxSender<int, float>> sender_;
-  
-  int counter_{0};
-
-  void task() override {
-    const std::string_view name = get_name();
-    
-    if (sender_) {
-      printf("%s: sending int (%d)\n", name.data(), counter_);
-      sender_->send_message<float>(counter_/5.0);
-
-      if (counter_++ >= 5) {
-        sender_->send_message<int>(-1);
-        mark_as_done();
-      }
-    } else {
-      auto handle = mailbox_.acquire_recv_handle();
-      if (handle) {
-        handle->visit(overloads{
-          [&](float f) {
-            printf("%s: message received (%d%%)\n", name.data(), (int)(f*100));
-          },
-          [&](int i) {
-            if (i < 0) {
-              mark_as_done();
-            }
-          },
-          [](std::span<const std::uint8_t> blob) {}
-        });
-      }
-    }
-  }
-};
+/**
+ * MAIN
+ */
 
 /// @brief restart system software whenever RTOS task stack overflows
 /// @param handle handle for the RTOS task
 /// @param name name of the RTOS task
 extern "C" void vApplicationStackOverflowHook(TaskHandle_t handle, char *name) {
-  constexpr const char* const fmt_str = "error: stack overflow in %s, triggering software restart";
-  /// TODO: log crash report to NVS
-  CHECK(false, fmt_str, name);
+  ESP_LOGE(kComponentTag, "error: stack overflow in %s, triggering software restart", name);
 }
 
 /// @brief firmware entrypoint
@@ -118,14 +77,15 @@ extern "C" void app_main() {
   /**
    * ACTIVE OBJECT INITIALIZATION
    */
-  std::vector<std::shared_ptr<ActiveObject>> components;
+  mp3::Mailbox<WifiObject::Command> wifi_mailbox(64);
+  if (!wifi_mailbox.send_message<WifiObject::Command>(WifiObject::Command::kSpinUp)) {
+    ESP_LOGE(kComponentTag, "unable to send Wifi message");
+  }
 
-  components.push_back(std::make_shared<SdCardObject>(kSdConfig));
-
-  auto obj1 = std::make_shared<TestComponent>();
-  auto obj2 = std::make_shared<TestComponent>(obj1->get_sender());
-  components.push_back(obj2);
-  components.push_back(obj1);
+  SdCardObject sd_object(kSdConfig);
+  WifiObject wifi_object(&wifi_mailbox);
+  
+  std::array<ActiveObject*, 2> components = {&sd_object, &wifi_object};
 
   // start all components
   for (auto component : components) {
@@ -141,7 +101,7 @@ extern "C" void app_main() {
     component->join();
   }
   ESP_LOGI(kComponentTag, "Components joined");
-
+  
   /**
    * CLEANUP
    */
