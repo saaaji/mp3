@@ -5,17 +5,16 @@
 #include <memory>
 #include <optional>
 
-#include "util.hpp"
-#include "active_object.hpp"
+#include "message_queue.hpp"
+#include "commands.hpp"
 #include "sd_card.hpp"
 #include "wifi_object.hpp"
-#include "mailbox.hpp"
+#include "bluetooth_object.hpp"
 
 extern "C" {
 
 #include "esp_log.h"
 #include "esp_task_wdt.h"
-#include "esp_heap_caps.h"
 
 }
 
@@ -75,17 +74,27 @@ extern "C" void app_main() {
   }
 
   /**
-   * ACTIVE OBJECT INITIALIZATION
+   * QUEUE INITIALIZATION
    */
-  mp3::Mailbox<WifiObject::Command> wifi_mailbox(64);
-  if (!wifi_mailbox.send_message<WifiObject::Command>(WifiObject::Command::kSpinUp)) {
+  rtos::MessageQueue<wifi::Command> wifi_queue(64);
+  if (!wifi_queue.send_message<>(wifi::Command::kSpinUp)) {
     ESP_LOGE(kComponentTag, "unable to send Wifi message");
   }
 
+  rtos::MessageQueue<bt::Command> bt_queue(64);
+
+  /**
+   * ACTIVE OBJECT INITIALIZATION
+   */
   SdCardObject sd_object(kSdConfig);
-  WifiObject wifi_object(&wifi_mailbox);
-  
-  std::array<ActiveObject*, 2> components = {&sd_object, &wifi_object};
+  wifi::WifiObject wifi_object(&wifi_queue, &bt_queue);
+  bt::BluetoothObject bt_object(&bt_queue, &wifi_queue);
+
+  std::array<ActiveObject*, 3> components = {
+    &sd_object, 
+    &wifi_object,
+    &bt_object
+  };
 
   // start all components
   for (auto component : components) {

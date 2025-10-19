@@ -19,7 +19,7 @@ extern "C" {
 
 }
 
-namespace mp3 {
+namespace rtos {
 
 using ::xRingbufferCreate;
 using ::vRingbufferDelete;
@@ -42,7 +42,7 @@ concept TriviallyCopyable = std::is_trivially_copyable_v<T>;
 /// @tparam ...ExplicitMessageTypes list of message types that can be sent/received
 template<typename... ExplicitMessageTypes> 
 requires ((Serializable<ExplicitMessageTypes> || TriviallyCopyable<ExplicitMessageTypes>) && ...)
-class Mailbox {
+class MessageQueue {
 private:
   /// @brief type ID for binary blob messages
   static constexpr std::uint8_t kBlobTypeId = 255;
@@ -196,12 +196,12 @@ public:
 public:
   /// @brief create a new mailbox with specified capacity
   /// @param capacity_bytes capacity of the mailbox in bytes
-  Mailbox(const std::size_t capacity_bytes) {
+  MessageQueue(const std::size_t capacity_bytes) {
     handle_ = xRingbufferCreate(capacity_bytes, RINGBUF_TYPE_NOSPLIT);
   }
 
   /// @brief destroy the mailbox and free the Ringbuffer
-  ~Mailbox() {
+  ~MessageQueue() {
     if (handle_) {
       vRingbufferDelete(handle_);
     }

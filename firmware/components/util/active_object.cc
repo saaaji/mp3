@@ -1,4 +1,4 @@
-#include "include/active_object.hpp"
+#include "active_object.hpp"
 
 extern "C" {
 

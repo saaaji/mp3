@@ -1,22 +1,24 @@
+#pragma once
+
 #include "active_object.hpp"
-#include "mailbox.hpp"
+#include "commands.hpp"
+#include "message_queue.hpp"
 
 extern "C" {
 
 #include "esp_err.h"
-#include "esp_log.h"
 #include "esp_http_server.h"
 
 }
 
+namespace wifi {
+
 class WifiObject : public ActiveObject {
 public:
-  enum class Command : uint8_t {
-    kSpinUp,
-    kSpinDown
-  };
-
-  WifiObject(mp3::Mailbox<WifiObject::Command>* mailbox);
+  WifiObject(
+    rtos::MessageQueue<Command>* my_queue,
+    rtos::MessageQueue<::bt::Command>* bt_queue
+  );
 
 private:
   enum class State : uint8_t {
@@ -24,7 +26,9 @@ private:
     kDown
   };
 
-  mp3::Mailbox<WifiObject::Command>* mailbox_;
+  rtos::MessageQueue<Command>* my_queue_{nullptr};
+  rtos::MessageQueue<::bt::Command>* bt_queue_{nullptr};
+
   State state_{State::kDown};
   httpd_handle_t handle_{nullptr};
 
@@ -37,3 +41,5 @@ private:
    */
   esp_err_t get_index(httpd_req_t* req);
 };
+
+}

@@ -5,7 +5,7 @@
 #include <system_error>
 #include <string_view>
 
-#include "include/sd_card.hpp"
+#include "sd_card.hpp"
 
 namespace {
 

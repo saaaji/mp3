@@ -1,11 +1,12 @@
 #include <string_view>
 #include <cstring>
 
-#include "include/wifi_object.hpp"
+#include "wifi_object.hpp"
 #include "util.hpp"
 
 extern "C" {
 
+#include "esp_log.h"
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_wifi.h"
@@ -29,9 +30,15 @@ constexpr const char* kIndexHtml = R"html(
 
 }
 
-WifiObject::WifiObject(mp3::Mailbox<WifiObject::Command>* mailbox)
+namespace wifi {
+
+WifiObject::WifiObject(
+  rtos::MessageQueue<Command>* my_queue,
+  rtos::MessageQueue<::bt::Command>* bt_queue
+)
   : ActiveObject("WifiObject", ActiveObject::MemoryLoad::kStandard, ActiveObject::Priority::kLow, 1000), 
-    mailbox_(mailbox) {}
+    my_queue_(my_queue),
+    bt_queue_(bt_queue) {}
 
 void WifiObject::spin_up() {
   ESP_ERROR_CHECK(esp_netif_init());
@@ -98,11 +105,11 @@ void WifiObject::spin_down() {
 
 void WifiObject::task() {
   // check for a message, otherwise do nothing
-  if (auto msg = mailbox_->acquire_recv_handle(pdMS_TO_TICKS(0))) {
+  if (auto msg = my_queue_->acquire_recv_handle(kNoWait)) {
     msg->visit(overloads{
-      [this](WifiObject::Command cmd) {
+      [this](Command cmd) {
         switch (cmd) {
-          case WifiObject::Command::kSpinUp:
+          case Command::kSpinUp:
             if (state_ == WifiObject::State::kUp) {
               break;
             }
@@ -110,7 +117,7 @@ void WifiObject::task() {
             ESP_LOGI(kComponentTag, "spinning up AP");
             spin_up();
             break;
-          case WifiObject::Command::kSpinDown:
+          case Command::kSpinDown:
             if (state_ == WifiObject::State::kDown) {
               break;
             }
@@ -129,3 +136,5 @@ esp_err_t WifiObject::get_index(httpd_req_t* req) {
   httpd_resp_send(req, kIndexHtml, HTTPD_RESP_USE_STRLEN);
   return ESP_OK;
 }
+
+} // namespace wifi
