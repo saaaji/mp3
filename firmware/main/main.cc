@@ -77,22 +77,26 @@ extern "C" void app_main() {
    * QUEUE INITIALIZATION
    */
   rtos::MessageQueue<wifi::Command> wifi_queue(64);
-  if (!wifi_queue.send_message<>(wifi::Command::kSpinUp)) {
-    ESP_LOGE(kComponentTag, "unable to send Wifi message");
-  }
+  // if (!wifi_queue.send_message<>(wifi::Command::kSpinUp)) {
+  //   ESP_LOGE(kComponentTag, "unable to send Wifi message");
+  // }
 
-  rtos::MessageQueue<bt::Command> bt_queue(64);
+  bt::BtQueue bt_queue(64);
 
   /**
    * ACTIVE OBJECT INITIALIZATION
    */
   SdCardObject sd_object(kSdConfig);
-  wifi::WifiObject wifi_object(&wifi_queue, &bt_queue);
+  // wifi::WifiObject wifi_object(&wifi_queue, &bt_queue);
   bt::BluetoothObject bt_object(&bt_queue, &wifi_queue);
 
-  std::array<ActiveObject*, 3> components = {
+  if (!bt_queue.send_message<>(bt::StartDiscovery {})) {
+    ESP_LOGE(kComponentTag, "unable to start discovery");
+  }
+
+  std::array<ActiveObject*, 2> components = {
     &sd_object, 
-    &wifi_object,
+    // &wifi_object,
     &bt_object
   };
 

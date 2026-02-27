@@ -54,6 +54,9 @@ private:
     return result;
   }();
 
+  // check alignment matches ringbuffer alignment
+  static_assert(max_alignment_ <= 32, "message alignment should not exceed ringbuffer alignment");
+
   /// @brief metadata header for messages
   struct alignas(max_alignment_) MessageHeader {
     std::uint8_t type_id; // type identifier for the message
@@ -289,6 +292,9 @@ public:
     }
 
     return std::make_optional<RecvHandle>(handle_, raw_slice);
+    // std::optional<RecvHandle> result;
+    // result.emplace(handle_, raw_slice);
+    // return result;
   }
 
 private:

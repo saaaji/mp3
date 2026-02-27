@@ -20,27 +20,57 @@ namespace bt {
 class BluetoothObject : public ActiveObject {
 public:
   BluetoothObject(
-    rtos::MessageQueue<Command>* my_queue,
+    BtQueue *my_queue,
     rtos::MessageQueue<::wifi::Command>* wifi_queue
   );
 
 private:
   enum class State : uint8_t {
-    kDiscovery
+    kIdle,
+    kDiscovery,
+    kDiscovered,
+    kConnecting, 
+    kConnected,
+    // kAuthComplete,
+
+    // subset of connected
+    kReady,
+    kStarting,
+    kStreaming,
+    kStopping
+    
+    /**
+     * can map out the state machine:
+     *  Action[event | current_state] = ..
+     * 
+     * Action[start discovery | kIdle] = start discovery, transition to kDiscovery
+     * Action[device found | kDiscovery] = cancel discovery, transition to kDiscovered
+     * Action[discovery stopped | kDiscovered] = connect, transition to kConnecting
+     * Action[connection complete | kConnecting] = wait for auth, stay in kConnecting
+     * Action[auth successful | kConnecting] = log and notify, transition to kAuthComplete
+     * Action[auth failed | kConnecting] = log and retry discovery, transition to kDiscovery
+     */
   };
 
-  rtos::MessageQueue<Command>* my_queue_{nullptr};
+  BtQueue *my_queue_{nullptr};
   rtos::MessageQueue<::wifi::Command>* wifi_queue_{nullptr};
 
-  State state_{State::kDiscovery};
+  State state_{State::kIdle};
+  esp_bd_addr_t bda_{0};
 
   void initialize() override;
   void task() override;
 
+  void transition(State next);
+  esp_err_t start_discovery();
+  esp_err_t cancel_discovery();
+  esp_err_t respond_pin(GapPinRequest&);
+  esp_err_t respond_ssp(GapSspRequest&);
+
   static void gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* param);
   static void avrcp_callback(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t* param);
   static void a2dp_callback(esp_a2d_cb_event_t event, esp_a2d_cb_param_t* param);
-  static signed int a2dp_data_callback(unsigned char* data, int32_t len);
+  static int32_t a2dp_data_callback(unsigned char* data, int32_t len);
 
   /**
    * To handle BT events must store pointer to the singleton.
