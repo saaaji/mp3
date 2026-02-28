@@ -16,6 +16,7 @@ namespace {
 constexpr const char* kComponentTag = "BluetoothObject";
 constexpr const char* kDeviceName = "esp32-mp3-player";
 constexpr const std::uint8_t kInquiryDuration = 10; // in 1.28sec units
+constexpr const int kThreadPeriodMs = 20;
 
 // placeholder until HTTP discovery interface is working
 constexpr std::string_view kTargetDeviceName = "OpenRun by Shokz";
@@ -48,12 +49,12 @@ namespace bt {
 BluetoothObject* BluetoothObject::instance_ = nullptr;
 
 BluetoothObject::BluetoothObject(
-  BtQueue *my_queue,
-  rtos::MessageQueue<::wifi::Command>* wifi_queue
+  std::shared_ptr<BtMessageQueue> my_queue,
+  std::shared_ptr<rtos::StreamingQueue> audio_queue
 )
-  : ActiveObject("BluetoothObject", ActiveObject::MemoryLoad::kStandard, ActiveObject::Priority::kHigh, 1000), 
+  : ActiveObject("BluetoothObject", ActiveObject::MemoryLoad::kHeavy, ActiveObject::Priority::kHigh, kThreadPeriodMs), 
     my_queue_(my_queue),
-    wifi_queue_(wifi_queue) {
+    audio_queue_(audio_queue) {
       assert(!instance_ && "only one BluetoothObject instance allowed");
       instance_ = this;
     }
@@ -398,14 +399,14 @@ void BluetoothObject::a2dp_callback(esp_a2d_cb_event_t event, esp_a2d_cb_param_t
 }
 
 int32_t BluetoothObject::a2dp_data_callback(unsigned char* data, int32_t len) {
-  // placeholder (esp-idf tutorial)
-  if (data == nullptr || len < 0) return 0;
+  if (!data || len < 0) return len;
 
-  // generate noise
-  int16_t *pcm = (int16_t *) data;
-  for (int i = 0; i < (len >> 1); i++) {
-    pcm[i] = rand() % (1 << 16);
+  std::size_t bytes_received = instance_->audio_queue_->read(std::span<uint8_t>(data, len));
+  if (bytes_received < len) {
+    std::memset(data + bytes_received, 0, len - bytes_received);
   }
+
+  // ESP_LOGI(kComponentTag, "data callback: %d bytes (got %zu)", len, bytes_received);
 
   return len;
 }

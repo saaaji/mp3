@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "message_queue.hpp"
+#include "streaming_queue.hpp"
 #include "commands.hpp"
 #include "sd_card.hpp"
 #include "wifi_object.hpp"
@@ -19,6 +20,8 @@ extern "C" {
 }
 
 namespace {
+
+constexpr std::size_t kKb = 1024;
 
 constexpr const char* kComponentTag = "AppMain";
 constexpr std::uint32_t kWatchdogTimeoutMs = 10 * 1000;
@@ -76,27 +79,26 @@ extern "C" void app_main() {
   /**
    * QUEUE INITIALIZATION
    */
-  rtos::MessageQueue<wifi::Command> wifi_queue(64);
+  // rtos::MessageQueue<wifi::Command> wifi_queue(64);
   // if (!wifi_queue.send_message<>(wifi::Command::kSpinUp)) {
   //   ESP_LOGE(kComponentTag, "unable to send Wifi message");
   // }
 
-  bt::BtQueue bt_queue(64);
+  auto bt_msg_queue = std::make_shared<bt::BtMessageQueue>(128);
+  auto bt_audio_queue = std::make_shared<rtos::StreamingQueue>(8 * kKb);
 
   /**
    * ACTIVE OBJECT INITIALIZATION
    */
-  SdCardObject sd_object(kSdConfig);
-  // wifi::WifiObject wifi_object(&wifi_queue, &bt_queue);
-  bt::BluetoothObject bt_object(&bt_queue, &wifi_queue);
+  SdCardObject sd_object(kSdConfig, bt_audio_queue);
+  bt::BluetoothObject bt_object(bt_msg_queue, bt_audio_queue);
 
-  if (!bt_queue.send_message<>(bt::StartDiscovery {})) {
+  if (!bt_msg_queue->send_message<>(bt::StartDiscovery {})) {
     ESP_LOGE(kComponentTag, "unable to start discovery");
   }
 
   std::array<ActiveObject*, 2> components = {
     &sd_object, 
-    // &wifi_object,
     &bt_object
   };
 

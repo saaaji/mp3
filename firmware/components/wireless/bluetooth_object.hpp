@@ -1,6 +1,8 @@
 #pragma once
 
+#include <memory>
 #include "message_queue.hpp"
+#include "streaming_queue.hpp"
 #include "commands.hpp"
 #include "active_object.hpp"
 
@@ -20,8 +22,8 @@ namespace bt {
 class BluetoothObject : public ActiveObject {
 public:
   BluetoothObject(
-    BtQueue *my_queue,
-    rtos::MessageQueue<::wifi::Command>* wifi_queue
+    std::shared_ptr<BtMessageQueue> my_queue,
+    std::shared_ptr<rtos::StreamingQueue> audio_queue
   );
 
 private:
@@ -31,29 +33,16 @@ private:
     kDiscovered,
     kConnecting, 
     kConnected,
-    // kAuthComplete,
 
-    // subset of connected
+    // subset of connected (probably move to a separate media state)
     kReady,
     kStarting,
     kStreaming,
     kStopping
-    
-    /**
-     * can map out the state machine:
-     *  Action[event | current_state] = ..
-     * 
-     * Action[start discovery | kIdle] = start discovery, transition to kDiscovery
-     * Action[device found | kDiscovery] = cancel discovery, transition to kDiscovered
-     * Action[discovery stopped | kDiscovered] = connect, transition to kConnecting
-     * Action[connection complete | kConnecting] = wait for auth, stay in kConnecting
-     * Action[auth successful | kConnecting] = log and notify, transition to kAuthComplete
-     * Action[auth failed | kConnecting] = log and retry discovery, transition to kDiscovery
-     */
   };
 
-  BtQueue *my_queue_{nullptr};
-  rtos::MessageQueue<::wifi::Command>* wifi_queue_{nullptr};
+  std::shared_ptr<BtMessageQueue> my_queue_;
+  std::shared_ptr<rtos::StreamingQueue> audio_queue_;
 
   State state_{State::kIdle};
   esp_bd_addr_t bda_{0};

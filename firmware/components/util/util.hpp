@@ -14,3 +14,9 @@ template<class... Ts>
 struct overloads : Ts... { using Ts::operator()...; };
 
 constexpr TickType_t kNoWait = pdMS_TO_TICKS(0);
+
+struct FileGuard {
+  void operator()(FILE* file) const noexcept {
+    if (file) fclose(file);
+  }
+};

@@ -20,7 +20,8 @@ public:
   enum class MemoryLoad : configSTACK_DEPTH_TYPE {
     kMinimal = 2048,
     kStandard = 4096,
-    kHeavy = 8192
+    kHeavy = 8192,
+    kHeavy2 = 32 * 1024
   };
 
   enum class Priority : UBaseType_t {

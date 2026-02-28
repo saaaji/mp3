@@ -47,7 +47,7 @@ struct A2dpMediaControlAck {
   esp_a2d_media_ctrl_ack_t status;
 };
 
-using BtQueue = rtos::MessageQueue<
+using BtMessageQueue = rtos::MessageQueue<
   StartDiscovery,
   GapDiscoveryStarted,
   GapDiscoveryStopped,

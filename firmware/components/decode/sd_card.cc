@@ -5,24 +5,27 @@
 #include <system_error>
 #include <string_view>
 
+#define MINIMP3_IMPLEMENTATION
+#include "minimp3.h"
+
 #include "sd_card.hpp"
 
 namespace {
 
 constexpr const char* kComponentTag = "SdCardObject";
 constexpr std::string_view kConfigPath = "/config/playback_order.txt";
+constexpr const int kThreadPeriodMs = 5;
 
-struct FileGuard {
-  void operator()(FILE* file) const noexcept {
-    if (file) fclose(file);
-  }
-};
+static mp3dec_t dec_;
+static std::array<std::uint8_t, 16 * 1024> mp3_buf_;
+static std::array<std::int16_t, MINIMP3_MAX_SAMPLES_PER_FRAME> pcm_buf_;
 
 }
 
-SdCardObject::SdCardObject(const Config& config)
-  : ActiveObject("SdCardObject", ActiveObject::MemoryLoad::kStandard, ActiveObject::Priority::kHigh, 1000),
-    config_(config) {}
+SdCardObject::SdCardObject(const Config& config, std::shared_ptr<rtos::StreamingQueue> audio_queue)
+  : ActiveObject("SdCardObject", ActiveObject::MemoryLoad::kHeavy2, ActiveObject::Priority::kHigh, kThreadPeriodMs),
+    config_(config),
+    audio_queue_(audio_queue) {}
 
 SdCardObject::~SdCardObject() {
   unmount();
@@ -78,27 +81,96 @@ void SdCardObject::initialize() {
   assert(create_directories());
   
   // Get and display all discovered MP3 files
-  file_paths_ = get_mp3_files();
-  ESP_LOGI(kComponentTag, "MP3 files on SD card:");
-  for (const auto& file : file_paths_) {
-    ESP_LOGI(kComponentTag, "\t%s", file.c_str());
-  }
+  // file_paths_ = get_mp3_files();
+  // ESP_LOGI(kComponentTag, "MP3 files on SD card:");
+  // for (const auto& file : file_paths_) {
+  //   ESP_LOGI(kComponentTag, "\t%s", file.c_str());
+  // }
   
   // Read playback order
-  queue_ = read_playback_order();
+  auto paths = read_playback_order();
+  queue_ = std::deque<std::string>(paths.begin(), paths.end());
+
   ESP_LOGI(kComponentTag, "Found %zu files in playback order:", queue_.size());
   for (const auto& file : queue_) {
     ESP_LOGI(kComponentTag, "\t%s", file.c_str());
   }
-  
+
   ESP_LOGI(kComponentTag, "SD card initialization complete");
 }
 
 void SdCardObject::task() {
-  // Periodic SD card monitoring (no infinite loop - framework handles timing)
-  // Could check card status, file system health, etc.
-  // For now, just a placeholder
-  mark_as_done();
+  static size_t mp3_data_size = 0;
+
+  if (!file_) {
+    if (queue_.empty()) return;
+
+    const auto& path = queue_.front();
+    file_.reset(fopen(path.c_str(), "rb"));
+
+    if (!file_) {
+      ESP_LOGE(kComponentTag, "could not open: %s", path.c_str());
+      queue_.pop_front();
+      return;
+    }
+
+    mp3dec_init(&dec_);
+    mp3_data_size = 0;
+
+    ESP_LOGI(kComponentTag, "decoding: %s", path.c_str());
+  }
+
+  // Read new data
+  size_t read = fread(mp3_buf_.data() + mp3_data_size,
+                      1,
+                      mp3_buf_.size() - mp3_data_size,
+                      file_.get());
+
+  // ESP_LOG_BUFFER_HEX(kComponentTag, mp3_buf_.data(), 16);
+
+  if (read == 0 && mp3_data_size_ == 0) {
+      file_.reset();
+      queue_.push_back(queue_.front());
+      queue_.pop_front();
+      return;
+  }
+
+  mp3_data_size += read;
+
+  size_t offset = 0;
+
+  while (offset < mp3_data_size) {
+      mp3dec_frame_info_t info;
+      int samples = mp3dec_decode_frame(
+          &dec_,
+          mp3_buf_.data() + offset,
+          mp3_data_size - offset,
+          pcm_buf_.data(),
+          &info
+      );
+
+      ESP_LOGI(kComponentTag, "INFO[bytes = %d, samples = %d]", info.frame_bytes, samples);
+
+      if (info.frame_bytes == 0)
+          break;
+
+      offset += info.frame_bytes;
+
+      if (samples > 0) {
+          audio_queue_->write(std::span<uint8_t>(
+              reinterpret_cast<uint8_t*>(pcm_buf_.data()),
+              samples * info.channels * sizeof(int16_t)
+          ));
+      }
+  }
+
+  // Preserve leftovers
+  mp3_data_size -= offset;
+  memmove(mp3_buf_.data(),
+          mp3_buf_.data() + offset,
+          mp3_data_size);
+
+  // mark_as_done();
 }
 
 bool SdCardObject::mount() {
