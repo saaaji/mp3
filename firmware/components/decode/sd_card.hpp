@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string_view>
 #include <vector>
+#include <deque>
 #include <string>
 
 extern "C" {
@@ -15,7 +16,8 @@ extern "C" {
 
 }
 
-#include "component.hpp"
+#include "streaming_queue.hpp"
+#include "active_object.hpp"
 #include "util.hpp"
 
 class SdCardObject : public ActiveObject {
@@ -47,7 +49,7 @@ public:
 
   /// @brief SD constructor
   /// @param config configuration for the SD card
-  SdCardObject(const Config& config);
+  SdCardObject(const Config& config, std::shared_ptr<rtos::StreamingQueue> audio_queue);
 
   /// @brief unmount the SD card on destruction
   ~SdCardObject();
@@ -91,5 +93,7 @@ private:
   std::vector<std::string> file_paths_;
 
   /// @brief vector of mp3 names as listed in the playback config
-  std::vector<std::string> queue_;
+  std::deque<std::string> queue_;
+  std::unique_ptr<FILE, FileGuard> file_{};
+  std::shared_ptr<rtos::StreamingQueue> audio_queue_{};
 };

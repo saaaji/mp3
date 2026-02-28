@@ -1,4 +1,5 @@
 idf_component_register(
-    SRCS "component.cc"
-    INCLUDE_DIRS "include"
+    SRCS "active_object.cc"
+    INCLUDE_DIRS "."
+    REQUIRES esp_common esp_ringbuf
 )

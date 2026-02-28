@@ -1,4 +1,4 @@
-#include "include/component.hpp"
+#include "active_object.hpp"
 
 extern "C" {
 
@@ -76,6 +76,9 @@ bool ActiveObject::start() {
         vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(*self->thread_period_ms_));
       }
     }
+
+    size_t high_mark = static_cast<size_t>(uxTaskGetStackHighWaterMark(nullptr));
+    ESP_LOGI(kComponentTag, "stack watermark for '%s': %zu", self->name_.data(), high_mark);
 
     // release the binary join semaphore
     if (self->join_sem_handle_) {

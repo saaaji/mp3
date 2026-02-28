@@ -1,9 +1,16 @@
+#include <array>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 
+#include "message_queue.hpp"
+#include "streaming_queue.hpp"
+#include "commands.hpp"
 #include "sd_card.hpp"
+#include "wifi_object.hpp"
+#include "bluetooth_object.hpp"
 
 extern "C" {
 
@@ -13,6 +20,8 @@ extern "C" {
 }
 
 namespace {
+
+constexpr std::size_t kKb = 1024;
 
 constexpr const char* kComponentTag = "AppMain";
 constexpr std::uint32_t kWatchdogTimeoutMs = 10 * 1000;
@@ -30,13 +39,15 @@ const SdCardObject::Config kSdConfig = {
 
 }
 
+/**
+ * MAIN
+ */
+
 /// @brief restart system software whenever RTOS task stack overflows
 /// @param handle handle for the RTOS task
 /// @param name name of the RTOS task
 extern "C" void vApplicationStackOverflowHook(TaskHandle_t handle, char *name) {
-  constexpr const char* const fmt_str = "error: stack overflow in %s, triggering software restart";
-  /// TODO: log crash report to NVS
-  CHECK(false, fmt_str, name);
+  ESP_LOGE(kComponentTag, "error: stack overflow in %s, triggering software restart", name);
 }
 
 /// @brief firmware entrypoint
@@ -66,10 +77,30 @@ extern "C" void app_main() {
   }
 
   /**
-   * COMPONENT INITIALIZATION
+   * QUEUE INITIALIZATION
    */
-  std::vector<std::shared_ptr<ActiveObject>> components;
-  components.push_back(std::make_shared<SdCardObject>(kSdConfig));
+  // rtos::MessageQueue<wifi::Command> wifi_queue(64);
+  // if (!wifi_queue.send_message<>(wifi::Command::kSpinUp)) {
+  //   ESP_LOGE(kComponentTag, "unable to send Wifi message");
+  // }
+
+  auto bt_msg_queue = std::make_shared<bt::BtMessageQueue>(128);
+  auto bt_audio_queue = std::make_shared<rtos::StreamingQueue>(8 * kKb);
+
+  /**
+   * ACTIVE OBJECT INITIALIZATION
+   */
+  SdCardObject sd_object(kSdConfig, bt_audio_queue);
+  bt::BluetoothObject bt_object(bt_msg_queue, bt_audio_queue);
+
+  if (!bt_msg_queue->send_message<>(bt::StartDiscovery {})) {
+    ESP_LOGE(kComponentTag, "unable to start discovery");
+  }
+
+  std::array<ActiveObject*, 2> components = {
+    &sd_object, 
+    &bt_object
+  };
 
   // start all components
   for (auto component : components) {
@@ -85,7 +116,7 @@ extern "C" void app_main() {
     component->join();
   }
   ESP_LOGI(kComponentTag, "Components joined");
-
+  
   /**
    * CLEANUP
    */

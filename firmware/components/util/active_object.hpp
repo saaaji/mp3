@@ -20,7 +20,8 @@ public:
   enum class MemoryLoad : configSTACK_DEPTH_TYPE {
     kMinimal = 2048,
     kStandard = 4096,
-    kHeavy = 8192
+    kHeavy = 8192,
+    kHeavy2 = 32 * 1024
   };
 
   enum class Priority : UBaseType_t {
@@ -30,9 +31,9 @@ public:
   };
 
   enum class CorePreference : BaseType_t {
+    kNone = tskNO_AFFINITY,
     kZero = 0,
-    kOne = 1,
-    kNone = tskNO_AFFINITY
+    kOne = 1
   };
 
   static constexpr std::size_t kMaxComponentNameLength = 32;
